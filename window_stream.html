@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Window Stream Test</title>
+</head>
+
+<body>
+    <style type="text/css">
+    embed {
+        display: inline-block;
+        border: solid 1px #999;
+    }
+    
+    #inputBox {
+        display: inline-block;
+        margin: 10px;
+    }
+    </style>
+    <script>
+    function updateHandle() {
+        var plugin = document.getElementById("plugin");
+        var inputBox = document.getElementById("inputBox");
+        plugin.postMessage('setWindowHandle ' + inputBox.value);
+    }
+    </script>
+    <span>Window handle: </span>
+    <input type="text" id="inputBox" name="inputBox" value="" oninput="updateHandle()" />
+    <br />
+    <embed id="plugin" type="application/x-ppapi-window-stream" width="500px" height="500px" />
+</body>
+
+</html>
