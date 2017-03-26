@@ -39,6 +39,12 @@ namespace
 	HANDLE sharedMemoryHandle = nullptr;
 	int allocatedSharedSize = 0;
 	void *sharedMemory = nullptr;
+	string streamName;
+	
+	bool CanStream()
+	{
+		return !streamName.empty();
+	}
 	
 	void DestroySharedMemory()
 	{
@@ -59,7 +65,7 @@ namespace
 	
 	void *CreateSharedMemory(int w, int h)
 	{
-		int requiredSize = w * h * 4 + 4;
+		int requiredSize = w * h * 4 + 8;
 		if (requiredSize <= allocatedSharedSize)
 		{
 			return sharedMemory;
@@ -67,11 +73,12 @@ namespace
 		
 		DestroySharedMemory();
 		
-		sharedMemoryHandle = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, requiredSize, L"Local\\WallpaperEngineBackBufferMem");
+		//sharedMemoryHandle = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, requiredSize, L"Local\\WallpaperEngineBackBufferMem");
+		sharedMemoryHandle = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, requiredSize, streamName.c_str());
 		
 		if (sharedMemoryHandle != nullptr)
 		{
-			sharedMemory = MapViewOfFile(sharedMemoryHandle, FILE_MAP_READ, 0, 0, requiredSize);
+			sharedMemory = MapViewOfFile(sharedMemoryHandle, FILE_MAP_ALL_ACCESS, 0, 0, requiredSize);
 			if (sharedMemory != nullptr)
 			{
 				allocatedSharedSize = requiredSize;
@@ -207,133 +214,14 @@ private:
 			pp::Point(10, 20), 0xFF000000);
 	}
 	
-	void StreamDXImage(pp::ImageData &image, int w, int h)
-	{
-		static IDirect3D9 *obj = nullptr;
-		static IDirect3DDevice9 *dev = nullptr;
-		
-		if (obj == nullptr && w > 400 && h > 400)
-		{
-			HRESULT res;
-			obj = Direct3DCreate9(D3D_SDK_VERSION);
-
-			//WINASSERT(obj != nullptr);
-			if (obj == nullptr)
-			{
-				//Error("Failed to create dx object.\n");
-				PaintError(image, "Failed to create D3D object.");
-			}
-
-			D3DCAPS9 caps;
-			res = obj->GetDeviceCaps(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, &caps);
-			//WINASSERT(res == S_OK);
-
-			// caps.DevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT // check for SM 2?
-			if ((caps.DevCaps & D3DPTEXTURECAPS_POW2) != 0)
-			{
-				//FatalError("Device does not support non power of two textures!");
-				PaintError(image, "D3D device not supported.");
-			}
-
-			D3DPRESENT_PARAMETERS d3dpp;
-			d3dpp.AutoDepthStencilFormat = D3DFMT_D16; //D3DFMT_D24S8;
-			d3dpp.BackBufferCount = 1;
-			//d3dpp->BackBufferFormat = D3DFMT_A8R8G8B8;
-			d3dpp.BackBufferFormat = D3DFMT_A8R8G8B8;
-			d3dpp.BackBufferHeight = h;
-			d3dpp.BackBufferWidth = w;
-			d3dpp.Windowed = true;
-			d3dpp.EnableAutoDepthStencil = true; //D3DFMT_D24S8;
-			d3dpp.Flags = 0;
-			//d3dpp->Flags = D3DPRESENTFLAG_DEVICECLIP;
-			d3dpp.FullScreen_RefreshRateInHz = D3DPRESENT_RATE_DEFAULT;
-			d3dpp.hDeviceWindow = windowHandle;
-			d3dpp.MultiSampleQuality = 0;
-			d3dpp.MultiSampleType = D3DMULTISAMPLE_NONE;
-			d3dpp.PresentationInterval = D3DPRESENT_INTERVAL_DEFAULT;
-			d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-		
-			res = obj->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, windowHandle, D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_PUREDEVICE, &d3dpp, &dev);
-			if (dev == nullptr)
-			{
-				PaintError(image, "Failed to create D3D device.");
-			}
-		}
-		
-		if (dev != nullptr)
-		{
-			static IDirect3DSurface9 *surface = nullptr;
-			if (surface == nullptr)
-			{
-				dev->CreateOffscreenPlainSurface(1920, 1080, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &surface, nullptr);
-				if (surface == nullptr)
-				{
-					PaintError(image, "Failed to create D3D surface.");
-				}
-			}
-			
-			if (surface != nullptr)
-			{
-				if (image.size().width() != w || image.size().height() != h)
-				{
-					PaintError(image, "Mismatching sizes.");
-				}
-				else
-				{
-					HRESULT res = dev->GetFrontBufferData(0, surface);
-					
-					if (FAILED(res))
-					{
-						stringstream ss;
-						ss << "Failed capturing screen with error: ";
-						switch (res)
-						{
-							case D3DERR_DRIVERINTERNALERROR: ss << "D3DERR_DRIVERINTERNALERROR"; break;
-							case D3DERR_DEVICELOST: ss << "D3DERR_DEVICELOST"; break;
-							case D3DERR_INVALIDCALL: ss << "D3DERR_INVALIDCALL"; break;
-							default: ss << "unknown";
-						}
-						
-						PaintError(image, ss.str());
-					}
-					else
-					{
-						D3DLOCKED_RECT rect;
-						if (SUCCEEDED(surface->LockRect(&rect, 0, 0)))
-						{
-							//if (rect.Pitch == width * 4)
-							{
-								//memcpy(rect.pBits, imageBuffer, imageSizeInBytes);
-							}
-							
-							if (rect.pBits == nullptr)
-							{
-								PaintError(image, "No bits set.");
-							}
-							else
-							{
-								memcpy(image.data(), rect.pBits, w * h * 4);
-								stringstream ss;
-								char a = ((char*)(rect.pBits))[0];
-								char b = ((char*)(rect.pBits))[1];
-								char c = ((char*)(rect.pBits))[2];
-								char d = ((char*)(rect.pBits))[3];
-								ss << "Streaming via D3D: " << to_string(a) << "," << to_string(b) << "," << to_string(c) << "," << to_string(d);
-								PaintError(image, ss.str().c_str(), false);
-							}
-							
-							surface->UnlockRect();
-							
-							//PaintError(image, "Streaming via D3D.", false);
-						}
-					}
-				}
-			}
-		}
-	}
-	
 	void ReadBackBufferFromSharedMemory(pp::ImageData &image, int w, int h)
 	{
+		if (!CanStream())
+		{
+			PaintError(image, "Stream memory not initializable.");
+			return;
+		}
+		
 		unsigned short *data = (unsigned short*)CreateSharedMemory(w, h);
 		
 		if (data == nullptr)
@@ -342,12 +230,17 @@ private:
 		}
 		else
 		{
+			// incoming data
 			int wSrc = data[0];
 			int hSrc = data[1];
+
+			// expected data
+			data[2] = w;
+			data[3] = h;
 			
 			if (wSrc == w && hSrc == h)
 			{
-				data += 2;
+				data += 4;
 				memcpy(image.data(), data, w * h * 4);
 				
 				//unsigned char c = *(((unsigned char*)data));
@@ -361,7 +254,7 @@ private:
 			}
 			else
 			{
-				PaintError(image, "Stream size mismatching.");
+				PaintError(image, "Stream size mismatching (try resizing the window).");
 			}
 		}
 		
@@ -640,6 +533,11 @@ private:
 				{
 					ScheduleNextPaint();
 				}
+			}
+			else if (elems[0] == "setStreamName" && !elems[1].empty())
+			{
+				streamName = "Local\\";
+				streamName += elems[1];
 			}
 		}
 	}
