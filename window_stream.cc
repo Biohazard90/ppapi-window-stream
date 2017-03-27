@@ -35,58 +35,6 @@ namespace
 		}
 		return elements;
 	}
-	
-	HANDLE sharedMemoryHandle = nullptr;
-	int allocatedSharedSize = 0;
-	void *sharedMemory = nullptr;
-	string streamName;
-	
-	bool CanStream()
-	{
-		return !streamName.empty();
-	}
-	
-	void DestroySharedMemory()
-	{
-		if (sharedMemory != nullptr)
-		{
-			UnmapViewOfFile(sharedMemory);
-			sharedMemory = nullptr;
-		}
-		
-		if (sharedMemoryHandle != nullptr)
-		{
-			CloseHandle(sharedMemoryHandle);
-			sharedMemoryHandle = nullptr;
-		}
-		
-		allocatedSharedSize = 0;
-	}
-	
-	void *CreateSharedMemory(int w, int h)
-	{
-		int requiredSize = w * h * 4 + 8;
-		if (requiredSize <= allocatedSharedSize)
-		{
-			return sharedMemory;
-		}
-		
-		DestroySharedMemory();
-		
-		//sharedMemoryHandle = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, requiredSize, L"Local\\WallpaperEngineBackBufferMem");
-		sharedMemoryHandle = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, requiredSize, streamName.c_str());
-		
-		if (sharedMemoryHandle != nullptr)
-		{
-			sharedMemory = MapViewOfFile(sharedMemoryHandle, FILE_MAP_ALL_ACCESS, 0, 0, requiredSize);
-			if (sharedMemory != nullptr)
-			{
-				allocatedSharedSize = requiredSize;
-			}
-		}
-		
-		return sharedMemory;
-	}
 }
 
 class WindowStreamInstance : public pp::Instance
@@ -102,7 +50,11 @@ public:
 		currentPixelBufferSize(0),
 		bitmap(nullptr),
 		bitmapW(-1),
-		bitmapH(-1)
+		bitmapH(-1),
+		sharedMemoryHandle(nullptr),
+		allocatedSharedSize(0),
+		sharedMemory(nullptr),
+		defaultColor(0xFFAABBCC)
 	{
 		//Gdiplus::GdiplusStartupInput gdiplusStartupInput;
 		//Gdiplus::GdiplusStartup(&m_gdiplusToken, &gdiplusStartupInput, NULL);
@@ -291,7 +243,7 @@ private:
 			{
 				for (int x = 0; x < size.width(); x++)
 				{
-					*image.GetAddr32(pp::Point(x, y)) = 0xFFAABBCC;
+					*image.GetAddr32(pp::Point(x, y)) = defaultColor;
 				}
 			}
 			return image;
@@ -324,194 +276,6 @@ private:
 		//return image;
 		ReadBackBufferFromSharedMemory(image, size.width(), size.height());
 		return image;
-
-		HDC hdc = GetDC(windowHandle);
-		if (hdc == nullptr)
-		{
-			PaintError(image, "Can't get window DC.");
-			return image;
-		}
-
-		//HDC hdcScreen = GetDC(0);
-		//if (hdcScreen == nullptr)
-		//{
-		//	PaintError(image, "Can't get screen DC.");
-		//	ReleaseDC(windowHandle, hdc);
-		//	return image;
-		//}
-
-		HDC hDest = CreateCompatibleDC(hdc);
-		if (hDest == nullptr)
-		{
-			PaintError(image, "Can't create compatible DC.");
-			//ReleaseDC(NULL, hdcScreen);
-			ReleaseDC(windowHandle, hdc);
-			return image;
-		}
-		
-		
-		if (bitmap != nullptr && (bitmapW != width || bitmapH != height))
-		{
-			DeleteObject(bitmap);
-			bitmap = nullptr;
-		}
-		
-		const int requiredPixelBufferSize = width * height * 4;
-		if (requiredPixelBufferSize < 1)
-		{
-			PaintError(image, "Pixel buffer size is 0.");
-			DeleteDC(hDest);
-			ReleaseDC(windowHandle, hdc);
-			//ReleaseDC(NULL, hdcScreen);
-			return image;
-		}
-
-		//HBITMAP bitmap = CreateCompatibleBitmap(hdcScreen, width, height);
-		static int *pbits=0;
-
-		BITMAPINFO bmpInfo = { 0 };
-		bmpInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-		bmpInfo.bmiHeader.biWidth = width;
-		bmpInfo.bmiHeader.biHeight = -height;
-		bmpInfo.bmiHeader.biPlanes = 1;
-		bmpInfo.bmiHeader.biBitCount = 32;
-		bmpInfo.bmiHeader.biCompression = BI_RGB;
-		bmpInfo.bmiHeader.biSizeImage = (width * height * bmpInfo.bmiHeader.biBitCount) / 8;
-		
-		if (bitmap == nullptr)
-		{
-			pbits = nullptr;
-			bitmapW = width;
-			bitmapH = height;
-			//bitmap = CreateCompatibleBitmap(hdcScreen, width, height);
-			//bitmap = CreateCompatibleBitmap(hDest, width, height);
-			bitmap=CreateDIBSection(hDest,&bmpInfo,DIB_RGB_COLORS,(void**)&pbits,0,0);
-			if (bitmap == nullptr)
-			{
-				PaintError(image, "Can't create compatible bitmap.");
-				DeleteDC(hDest);
-				ReleaseDC(windowHandle, hdc);
-				//ReleaseDC(NULL, hdcScreen);
-				return image;
-			}
-		}
-		
-		bool hadError = false;
-		int error = 0;
-		SetLastError(0);
-
-		// Copy window contents into local device context
-		HBITMAP hOldBitmap = (HBITMAP) SelectObject(hDest, bitmap);
-		error = GetLastError();
-		if (error)
-		{
-			hadError = true;
-			stringstream str;
-			str << "Failed SelectObject with " << error;
-			PaintError(image, str.str().c_str());
-		}
-		
-      //HWND oldWindow = GetForegroundWindow();
-      //SetForegroundWindow(windowHandle);
-		if (BitBlt(hDest, 0, 0, width, height, hdc, 0, 0, SRCCOPY) == FALSE)
-		//if (PrintWindow(windowHandle, hDest, 0) == FALSE)
-		{
-			hadError = true;
-			error = GetLastError();
-			stringstream str;
-			str << "Failed BitBlt with " << error;
-			PaintError(image, str.str().c_str());
-		}
-      //SetForegroundWindow(oldWindow);
-		
-		(HBITMAP) SelectObject(hDest, hOldBitmap);
-		error = GetLastError();
-		if (error)
-		{
-			hadError = true;
-			stringstream str;
-			str << "Failed SelectObject 2 with " << error;
-			PaintError(image, str.str().c_str());
-		}
-
-		// Allocate buffer of minimum size
-		if (requiredPixelBufferSize > currentPixelBufferSize || pixelBuffer == nullptr)
-		{
-			if (pixelBuffer != nullptr)
-			{
-				VirtualFree(pixelBuffer, 0, MEM_RELEASE);
-			}
-
-			pixelBuffer = (int*) VirtualAlloc(0, requiredPixelBufferSize, MEM_COMMIT, PAGE_READWRITE);
-			currentPixelBufferSize = requiredPixelBufferSize;
-			
-			if (pixelBuffer == nullptr)
-			{
-				PaintError(image, "Failed allocating pixel buffer.");
-				DeleteDC(hDest);
-				ReleaseDC(windowHandle, hdc);
-				//ReleaseDC(NULL, hdcScreen);
-				DeleteObject(bitmap);
-				return image;
-			}
-		}
-		
-		if(!GdiFlush())
-		{
-			PaintError(image, "Failed to flush GDI.");
-			DeleteDC(hDest);
-			ReleaseDC(windowHandle, hdc);
-			DeleteObject(bitmap);
-			return image;
-		}
-		//HANDLE hDIB = GlobalAlloc(GHND,requiredPixelBufferSize); 
-		//int *lpbitmap = (int *)GlobalLock(hDIB); 
-
-		// Copy image data from bitmap into array
-		//int copyResult = GetDIBits(hDest, bitmap, 0, height, pixelBuffer, &bmpInfo, DIB_RGB_COLORS);
-
-		// Insert the entire image if the width matches. Alpha is not modified here.
-		if (width == size.width())
-		{
-			int imageSize = size.height() * size.width() * 4;
-			memcpy(image.data(), pbits, imageSize < currentPixelBufferSize ? imageSize : currentPixelBufferSize);
-		}
-		else if ( pbits != nullptr )
-		{
-			PaintError(image, "Image size mismatch, discarding.");
-			// Remap each pixel individually and overwrite alpha.
-			//for (int y = 0; y < 100; ++y)
-			//{
-			//	for (int x = 0; x < 100; ++x)
-			//	{
-			//		*image.GetAddr32(pp::Point(x, y)) = pbits[x + y * width] | 0xFF000000;
-			//	}
-			//}
-		}
-		else
-		{
-			PaintError(image, "Buffer not available.");
-		}
-
-		// if (copyResult == ERROR_INVALID_PARAMETER || copyResult == 0)
-		// {
-		// 	PaintError(image, "Failed copying window bits.");
-		// }
-		// else
-		//if (!hadError)
-		{
-			//PaintError(image, "Streaming...", false);
-		}
-		
-		//GlobalUnlock(hDIB);    
-		//GlobalFree(hDIB);
-
-		DeleteDC(hDest);
-		ReleaseDC(windowHandle, hdc);
-		//ReleaseDC(NULL, hdcScreen);
-		//DeleteObject(bitmap);
-		//bitmap = nullptr;
-		return image;
 	}
 
 	virtual void HandleMessage(const pp::Var& messageData)
@@ -539,8 +303,65 @@ private:
 				streamName = "Local\\";
 				streamName += elems[1];
 			}
+			else if (elems[0] == "setDefaultColor" && !elems[1].empty())
+			{
+				defaultColor = strtoul(elems[1].c_str(), nullptr, 0);
+			}
 		}
 	}
+	
+	bool CanStream()
+	{
+		return !streamName.empty();
+	}
+	
+	void DestroySharedMemory()
+	{
+		if (sharedMemory != nullptr)
+		{
+			UnmapViewOfFile(sharedMemory);
+			sharedMemory = nullptr;
+		}
+		
+		if (sharedMemoryHandle != nullptr)
+		{
+			CloseHandle(sharedMemoryHandle);
+			sharedMemoryHandle = nullptr;
+		}
+		
+		allocatedSharedSize = 0;
+	}
+	
+	void *CreateSharedMemory(int w, int h)
+	{
+		int requiredSize = w * h * 4 + 8;
+		if (requiredSize <= allocatedSharedSize)
+		{
+			return sharedMemory;
+		}
+		
+		DestroySharedMemory();
+		
+		//sharedMemoryHandle = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, requiredSize, L"Local\\WallpaperEngineBackBufferMem");
+		sharedMemoryHandle = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, requiredSize, streamName.c_str());
+		
+		if (sharedMemoryHandle != nullptr)
+		{
+			sharedMemory = MapViewOfFile(sharedMemoryHandle, FILE_MAP_ALL_ACCESS, 0, 0, requiredSize);
+			if (sharedMemory != nullptr)
+			{
+				allocatedSharedSize = requiredSize;
+			}
+		}
+		
+		return sharedMemory;
+	}
+	
+	HANDLE sharedMemoryHandle;
+	int allocatedSharedSize;
+	void *sharedMemory;
+	string streamName;
+	unsigned long defaultColor;
 
 	pp::Size size;
 	pp::Graphics2D deviceContext;
