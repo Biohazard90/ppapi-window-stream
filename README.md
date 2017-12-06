@@ -1,6 +1,7 @@
 ## Building
 
 1. Download and build chromium.
+2. Set to static link in chromium\src\build\config\win\BUILD.gn
 2. Add plugin to ppapi_test.gypi
 
 ```
@@ -18,8 +19,15 @@
 ```
 
 3. Cd to chromium src\
-4. Rebuild projects: build\gyp_chromium -Dcomponent=shared_library
-5. Compile: ninja -C out\Release ppapi_window_stream
+4. gn args out/Default
+	
+is_debug=false
+is_component_build=false
+target_cpu="x86"
+
+gn gen out/Default
+
+5. Compile: ninja target_cpu = "x86" -C out\Default window_stream
 
 ## License
 

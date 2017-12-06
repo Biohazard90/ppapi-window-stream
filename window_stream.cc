@@ -39,6 +39,7 @@ namespace
 
 class WindowStreamInstance : public pp::Instance
 {
+	int lastStreamError;
 public:
 	explicit WindowStreamInstance(PP_Instance instance)
 		: pp::Instance(instance),
@@ -54,7 +55,8 @@ public:
 		sharedMemoryHandle(nullptr),
 		allocatedSharedSize(0),
 		sharedMemory(nullptr),
-		defaultColor(0xFFAABBCC)
+		defaultColor(0xFFAABBCC),
+		lastStreamError(0)
 	{
 		//Gdiplus::GdiplusStartupInput gdiplusStartupInput;
 		//Gdiplus::GdiplusStartup(&m_gdiplusToken, &gdiplusStartupInput, NULL);
@@ -178,7 +180,9 @@ private:
 		
 		if (data == nullptr)
 		{
-			PaintError(image, "Failed creating shared memory for stream.");
+			stringstream errorMessage;
+			errorMessage << "Failed creating shared memory for stream: " << dec << (lastStreamError);
+			PaintError(image, errorMessage.str().c_str());
 		}
 		else
 		{
@@ -192,7 +196,7 @@ private:
 			
 			if (wSrc == w && hSrc == h)
 			{
-				data += 4;
+				data += 5;
 				memcpy(image.data(), data, w * h * 4);
 				
 				//unsigned char c = *(((unsigned char*)data));
@@ -319,6 +323,8 @@ private:
 	{
 		if (sharedMemory != nullptr)
 		{
+			// Set destruction flag
+			((unsigned short *)sharedMemory)[4] = 1;
 			UnmapViewOfFile(sharedMemory);
 			sharedMemory = nullptr;
 		}
@@ -334,7 +340,7 @@ private:
 	
 	void *CreateSharedMemory(int w, int h)
 	{
-		int requiredSize = w * h * 4 + 8;
+		int requiredSize = w * h * 4 + 10;
 		if (requiredSize <= allocatedSharedSize)
 		{
 			return sharedMemory;
@@ -350,8 +356,17 @@ private:
 			sharedMemory = MapViewOfFile(sharedMemoryHandle, FILE_MAP_ALL_ACCESS, 0, 0, requiredSize);
 			if (sharedMemory != nullptr)
 			{
+				((unsigned short *)sharedMemory)[4] = 0;
 				allocatedSharedSize = requiredSize;
 			}
+			else
+			{
+				lastStreamError = GetLastError();
+			}
+		}
+		else
+		{
+			lastStreamError = GetLastError();
 		}
 		
 		return sharedMemory;
