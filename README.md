@@ -1,6 +1,6 @@
 ## DEPRECATED
 
-Google has deprecated PPAPI and it's not available in CEF anymore. This repository will be superseded by a Chromium mod (TBD) that enables high performance Dx11 texturesharing via WebGL2 from an external process.
+Google has deprecated PPAPI and it's not available in CEF anymore. This repository will be superseded by a Chromium mod (https://github.com/Biohazard90/chromium-webgl-dx11-shared-texture) that enables high performance Dx11 texturesharing via WebGL2 from an external process.
 
 ## Building
 
